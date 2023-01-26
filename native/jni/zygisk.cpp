@@ -2,16 +2,51 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <android/log.h>
+#include <vector>
+#include <iostream>
+#include <sys/mman.h>
+#include <stdio.h>
+#include <string>
+#include <sys/stat.h>
 
 #include "zygisk.hpp"
+#include <lsplt.hpp>
+#include <android/log.h>
+
+#define LOG_TAG "MapHide"
+
+#define LOGV(...) __android_log_print(ANDROID_LOG_VERBOSE, LOG_TAG, __VA_ARGS__)
+#define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
+#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
+#define LOGW(...) __android_log_print(ANDROID_LOG_WARN, LOG_TAG, __VA_ARGS__)
+#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
+#define LOGF(...) __android_log_print(ANDROID_LOG_FATAL, LOG_TAG, __VA_ARGS__)
+
+
+#define CONFIG_PATH "/data/adb/maphide"
+#define PKG_LIST    CONFIG_PATH "/packages.list"
+#define MAP_LIST   CONFIG_PATH "/mapname.list"
+
+static void hide_from_maps(std::vector<lsplt::MapInfo> maps) {
+    for (auto &info : maps) {
+        LOGI("hide: %s\n", info.path.data());
+        void *addr = reinterpret_cast<void *>(info.start);
+        size_t size = info.end - info.start;
+        void *copy = mmap(nullptr, size, PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+        if ((info.perms & PROT_READ) == 0) {
+            mprotect(addr, size, PROT_READ);
+        }
+        memcpy(copy, addr, size);
+        mremap(copy, size, size, MREMAP_MAYMOVE | MREMAP_FIXED, addr);
+        mprotect(addr, size, info.perms);
+    }
+}
 
 using zygisk::Api;
 using zygisk::AppSpecializeArgs;
 using zygisk::ServerSpecializeArgs;
 
-#define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, "Magisk", __VA_ARGS__)
-
-class MyModule : public zygisk::ModuleBase {
+class MapHide : public zygisk::ModuleBase {
 public:
     void onLoad(Api *api, JNIEnv *env) override {
         this->api = api;
@@ -19,46 +54,41 @@ public:
     }
 
     void preAppSpecialize(AppSpecializeArgs *args) override {
-        // Use JNI to fetch our process name
-        const char *process = env->GetStringUTFChars(args->nice_name, nullptr);
-        preSpecialize(process);
-        env->ReleaseStringUTFChars(args->nice_name, process);
+    	if (args->uid > 1000) {
+            DoHide();
+    	}
+        api->setOption(zygisk::Option::DLCLOSE_MODULE_LIBRARY);
     }
 
     void preServerSpecialize(ServerSpecializeArgs *args) override {
-        preSpecialize("system_server");
+        api->setOption(zygisk::Option::DLCLOSE_MODULE_LIBRARY);
     }
 
 private:
     Api *api;
     JNIEnv *env;
 
-    void preSpecialize(const char *process) {
-        // Demonstrate connecting to to companion process
-        // We ask the companion for a random number
-        unsigned r = 0;
-        int fd = api->connectCompanion();
-        read(fd, &r, sizeof(r));
-        close(fd);
-        LOGD("example: process=[%s], r=[%u]\n", process, r);
-
-        // Since we do not hook any functions, we should let Zygisk dlclose ourselves
-        api->setOption(zygisk::Option::DLCLOSE_MODULE_LIBRARY);
+    void DoHide() {
+    	auto maps = lsplt::MapInfo::Scan();
+        struct stat st;
+        if (stat("/data", &st)) return;
+        // hide module file from maps
+        // detection: https://github.com/vvb2060/MagiskDetector/blob/master/README_ZH.md
+        // hide all maps with path is data partition but path is not /data/*
+        for (auto iter = maps.begin(); iter != maps.end();) {
+            if (iter->dev != st.st_dev || (iter->path).starts_with("/data/")) {
+                iter = maps.erase(iter);
+            } else {
+                ++iter;
+            }
+        }
+        hide_from_maps(maps);
     }
-
 };
 
-static int urandom = -1;
-
 static void companion_handler(int i) {
-    if (urandom < 0) {
-        urandom = open("/dev/urandom", O_RDONLY);
-    }
-    unsigned r;
-    read(urandom, &r, sizeof(r));
-    LOGD("example: companion r=[%u]\n", r);
-    write(i, &r, sizeof(r));
+    return;
 }
 
-REGISTER_ZYGISK_MODULE(MyModule)
+REGISTER_ZYGISK_MODULE(MapHide)
 REGISTER_ZYGISK_COMPANION(companion_handler)
