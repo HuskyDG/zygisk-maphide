@@ -1,0 +1,6 @@
+id=example_zygisk_module
+name=An example Zygisk module
+author=HuskyDG
+version=1.0
+versionCode=1
+description=This is an example zygisk module that does something
