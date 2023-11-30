@@ -22,11 +22,6 @@
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 #define LOGF(...) __android_log_print(ANDROID_LOG_FATAL, LOG_TAG, __VA_ARGS__)
 
-
-#define CONFIG_PATH "/data/adb/maphide"
-#define PKG_LIST    CONFIG_PATH "/packages.list"
-#define MAP_LIST   CONFIG_PATH "/mapname.list"
-
 static void hide_from_maps(std::vector<lsplt::MapInfo> maps) {
     for (auto &info : maps) {
         LOGI("hide: %s\n", info.path.data());
@@ -54,7 +49,8 @@ public:
     }
 
     void preAppSpecialize(AppSpecializeArgs *args) override {
-    	if (args->uid > 1000) {
+        uint32_t flags = api->getFlags();
+    	if ((flags & zygisk::PROCESS_ON_DENYLIST) && args->uid > 1000) {
             DoHide();
     	}
         api->setOption(zygisk::Option::DLCLOSE_MODULE_LIBRARY);
@@ -76,7 +72,11 @@ private:
         // detection: https://github.com/vvb2060/MagiskDetector/blob/master/README_ZH.md
         // hide all maps with path is data partition but path is not /data/*
         for (auto iter = maps.begin(); iter != maps.end();) {
-            if (iter->dev != st.st_dev || (iter->path).starts_with("/data/")) {
+            if (iter->dev != st.st_dev || 
+            (!(iter->path).starts_with("/system/") &&
+             !(iter->path).starts_with("/vendor/") &&
+             !(iter->path).starts_with("/product/") &&
+             !(iter->path).starts_with("/system_ext/"))) {
                 iter = maps.erase(iter);
             } else {
                 ++iter;

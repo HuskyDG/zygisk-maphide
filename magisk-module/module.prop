@@ -1,6 +1,6 @@
 id=zygisk-maphide
 name=Zygisk Maphide
 author=HuskyDG
-version=1.0
-versionCode=1
-description=Hide memory path from maps
+version=2.0
+versionCode=2
+description=Wipe out the traces of mounted files of Magisk module
